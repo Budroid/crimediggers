@@ -59,7 +59,6 @@ for event in event_list:
     previous = event
 
 # Show result in on google maps
-# 
 url = "https://www.google.nl/maps/place/52%C2%B021'37.8%22N+4%C2%B052'28.2%22E/@" + result.replace(";", ",") + ",19z/data=!4m5!3m4!1s0x0:0x0!8m2!3d52.3605!4d4.8745"
 chrome_path = '/usr/bin/google-chrome %s'
 webbrowser.get(chrome_path).open(url)
