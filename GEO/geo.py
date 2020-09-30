@@ -3,7 +3,6 @@
 import xml.etree.ElementTree as ET
 import json, webbrowser
 
-print("CRIMEDIGGERS  -  GEO")
 trees = [ET.parse('GPS 1.gpx'), ET.parse('GPS 2.gpx')]
 event_list = []
 suspicious_area_list = []
@@ -19,6 +18,7 @@ def add_to_events(time, location, action, device):
                        "action": action, 
                        "device": device})
 
+print("CRIMEDIGGERS  -  GEO")
 # First check whenever they where close to eachother
 for location_1 in trees[0].getroot().iter('wpt'):
     for location_2 in trees[1].getroot().iter('wpt'):
