@@ -8,12 +8,14 @@
 from scapy.all import *
 from scapy.packet import *
 from scapy.layers.inet import TCP
-import json, re, base64, zipfile, tempfile, sys, os, subprocess
+import json, re, base64, zipfile, tempfile, sys, os, subprocess, shutil
 
 email_ports = [25, 110]          # SMTP and POP, as we saw in the Wireshark statistics
 packets = rdpcap('./jim.pcapng') # The capture
 mail_list = []                   # List of mails, constructed during analysis
-attachment_list = []
+attachment_list = []             # To be analysed in phase 3
+password_candidates = set()      # Lijst van alle unieke woorden in het mailverkeer
+
 
 def is_email_packet(packet):
     # All TCP packets with the correct port numbers and an actual payload
@@ -68,25 +70,67 @@ def parse_data(data, header):
        # TODO This only works for base64 encoded attachments and plain text now. Can be extended with other encoding types
        message_text = []
        for line in data.replace(b"\r\n.\r\n", b"").split(b'\r\n'):
-           if line: message_text.append(line.decode('utf-8'))
+           if line:
+               text_string = line.decode('utf-8')
+               message_text.append(text_string)
+               #  Add the text to the password candidates  
+               if "text" in header["Content-Type"]: add_to_candidates(text_string)
        data_dict["message_lines"] = message_text
     return data_dict
 
+def add_to_candidates(text):
+    password_candidates.update(text.split(" "))
+    
 def get_boundary(content_type):
     boundary = re.search(r'(?<=boundary=\")(.*)(?=\")', content_type).group(1)
     return "--" + boundary
 
 def get_filename(content_disposition):
-    return re.search(r'(?<=filename=)(.*)(?=;)', content_disposition).group(1)  
+    return re.search(r'(?<=filename=)(.*)(?=;)', content_disposition).group(1)
+
+def is_zip_encrypted(archive_name):
+    zf = zipfile.ZipFile(archive_name)
+    for zinfo in zf.infolist():
+        is_encrypted = zinfo.flag_bits & 0x1 
+    return is_encrypted
+
+def default_crack(filename):
+    for candidate in password_candidates:
+        if candidate:
+            try:
+                with zipfile.ZipFile("./" + filename) as zip_ref:
+                    zip_ref.extractall(tmpdirname, pwd=bytes(candidate, "utf-8"))
+                    print("Extracted " + filename + " to temporary directory")
+                    return True
+            except Exception as e:
+                if "Bad password" in str(e):
+                    continue
+                else:
+                    break
+    return False 
+
+def _7z_crack(filename, tmp):
+    for candidate in password_candidates:
+        if candidate and filename and tmp:
+            command = "7z x -p" + candidate.replace("'", "").replace("\"", "").replace(">", "") + " " + filename + " -y -o"+tmp
+            try:
+               completed_process = subprocess.run(command, shell=True, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL)
+               if not (completed_process.stderr and "Wrong password" in str(completed_process.stderr)):
+                  return True    
+            except subprocess.CalledProcessError:
+               print("Something went wrong. Exitting...")
+               sys.exit()
+            except Exception:
+               print("Something went wrong. Exitting...")
+               sys.exit()
+    return False
 
 print("CRIMEDIGGERS  -  TCP/IP\n")
-print("Phase 1: Data collection")
 # First we need to collect all the required data
 for pkt in packets:
     if is_message(pkt):
        mail = parse_payload(bytes(pkt[TCP].payload))
        mail_list.append(mail)
-print("Phase 2: Print timeline")
 # Now we have all information structured, lets print a nice timeline
 # TODO Put this in a function, it now disturbs reading the main programm flow
 for mail in mail_list:
@@ -117,10 +161,9 @@ for mail in mail_list:
                 attachment_dict["filename"] = filename
                 attachment_dict["file"] = attachment
                 attachment_list.append(attachment_dict)
-    print("".join(["-" for x in range(0, 100)]), end='\n', flush=True)       
+    print("".join(["-" for x in range(0, 100)]), end='\n\n\n', flush=True)       
 
-print("Phase 3: Saving attachments")
-# Now save the attachments to disk
+#Save attachments
 for attachment in attachment_list:
     filename = attachment["filename"]
     try:
@@ -129,36 +172,48 @@ for attachment in attachment_list:
         with open("./" + filename,"wb+") as f:
              f.write(file_content) 
              print("Saving " + filename + " DONE")
-    except Exception as e:
+    except Exception:
         print("Saving file failed")
-        print(str(e))
         sys.exit()   
 
     # In case of zipped files, extract them
-    # TODO implement more extentions/compressing formats 
+    # TODO implement more extentions/compressing formats
+    # TODO don't check extention, but check the bytes
     if filename.endswith(".zip"):
         # Create tmp folder
         try:
             with tempfile.TemporaryDirectory() as tmpdirname:
                  print('Created temporary directory', tmpdirname)
-        except Exception as e:
+        except Exception:
             print("Creating tempory directory failed")
-            print(str(e))
             sys.exit()
-        # Extract files to tmp       
-        try:
-            with zipfile.ZipFile("./" + filename) as zip_ref:
-                 zip_ref.extractall(tmpdirname, pwd=b'5Jsg23Po%q12')
-                 print("Exctracted " + filename + " to temporary directory")
-        except Exception as e:
-            print("Unable to extract, trying 7z")
-            FNULL = open(os.devnull, 'w')
+
+        # Extract files to tmp
+        # Check if zip is encrypted
+        if is_zip_encrypted("./" + filename):
+            print("Zip is encrypted. Trying to decrypt it")
+            if default_crack(filename):
+                print("Cracked")
+            else:
+                if _7z_crack(filename, tmpdirname):
+                    print("Cracked")
+                else:
+                    print("7z didn't succeed as well, your file sucks. Exitting...")
+                    sys.exit()
+        else:
             try:
-               subprocess.check_call(["7z", "x", "-p5Jsg23Po%q12", filename, "-o"+tmpdirname], stdout=FNULL)
-               print("Exctracted " + filename + " with 7z to " + tmpdirname)
-            except subprocess.CalledProcessError:
-                print("7z didn't succeed as well, your file sucks. Exitting...")
-                sys.exit()
+                with zipfile.ZipFile("./" + filename) as zip_ref:
+                    zip_ref.extractall(tmpdirname)
+                    print("Extracted " + filename + " to temporary directory")
+            except Exception as e:
+                print("Unable to extract, trying 7z")
+                FNULL = open(os.devnull, 'w')
+                try:
+                    subprocess.check_call(["7z", "x", filename, "-o"+tmpdirname], stdout=FNULL)
+                    print("Extracted " + filename + " with 7z to " + tmpdirname)
+                except subprocess.CalledProcessError:
+                    print("7z didn't succeed as well, your file sucks. Exitting...")
+                    sys.exit()
         # Now check the contents of the tmp dir with the extracted files
         for subdir, dirs, files in os.walk(tmpdirname):
             for file in files:
@@ -166,15 +221,18 @@ for attachment in attachment_list:
                 # TODO Add more file support, check for MIME Type etc
                 try:
                     with open(filepath, "r") as f:
+                        print("Content of " + file + ":\n")
                         for l in f:
-                            print(l)
+                            print("{:<14} {}".format('', l))
                 except UnicodeDecodeError:
                     pass # non-text data TODO implement this
-
+                finally:
+                    os.remove(filepath)
+        os.rmdir(tmpdirname)
+    else:
+        # TODO check the content of the non-zip files
+        pass
                         
-
-
-
 
 
 
