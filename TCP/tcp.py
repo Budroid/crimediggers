@@ -166,14 +166,15 @@ for mail in mail_list:
 #Save attachments
 for attachment in attachment_list:
     filename = attachment["filename"]
+    print("Saving {}".format(filename).ljust(50, "."), end="")
     try:
         # TODO implement more encodings
         file_content=base64.b64decode(attachment["file"])
         with open("./" + filename,"wb+") as f:
              f.write(file_content) 
-             print("Saving " + filename + " DONE")
+             print("DONE")
     except Exception:
-        print("Saving file failed")
+        print("FAILED")
         sys.exit()   
 
     # In case of zipped files, extract them
@@ -181,24 +182,25 @@ for attachment in attachment_list:
     # TODO don't check extention, but check the bytes
     if filename.endswith(".zip"):
         # Create tmp folder
+        print("Creating temporary directory".ljust(50, "."), end="")
         try:
             with tempfile.TemporaryDirectory() as tmpdirname:
-                 print('Created temporary directory', tmpdirname)
+                 print("DONE")
         except Exception:
-            print("Creating tempory directory failed")
+            print("FAILED")
             sys.exit()
 
         # Extract files to tmp
         # Check if zip is encrypted
         if is_zip_encrypted("./" + filename):
-            print("Zip is encrypted. Trying to decrypt it")
+            print("Zip is encrypted. Trying to decrypt it".ljust(50, "."), end="")
             if default_crack(filename):
-                print("Cracked")
+                print("DONE")
             else:
                 if _7z_crack(filename, tmpdirname):
-                    print("Cracked")
+                    print("DONE")
                 else:
-                    print("7z didn't succeed as well, your file sucks. Exitting...")
+                    print("FAILED")
                     sys.exit()
         else:
             try:
@@ -215,19 +217,24 @@ for attachment in attachment_list:
                     print("7z didn't succeed as well, your file sucks. Exitting...")
                     sys.exit()
         # Now check the contents of the tmp dir with the extracted files
+        print("Checking content of archive".ljust(50, "."), end="")
+        content = []
         for subdir, dirs, files in os.walk(tmpdirname):
             for file in files:
                 filepath = subdir + os.sep + file
                 # TODO Add more file support, check for MIME Type etc
                 try:
                     with open(filepath, "r") as f:
-                        print("Content of " + file + ":\n")
-                        for l in f:
-                            print("{:<14} {}".format('', l))
+                         for l in f:
+                             content.append(l)        
                 except UnicodeDecodeError:
                     pass # non-text data TODO implement this
                 finally:
                     os.remove(filepath)
+        print("DONE")            
+        print("Content of " + file + ":\n")
+        for line in content:
+            print("{:<14} {}".format('', line))            
         os.rmdir(tmpdirname)
     else:
         # TODO check the content of the non-zip files
