@@ -161,7 +161,7 @@ for mail in mail_list:
                 attachment_dict["filename"] = filename
                 attachment_dict["file"] = attachment
                 attachment_list.append(attachment_dict)
-    print("".join(["-" for x in range(0, 100)]), end='\n\n\n', flush=True)       
+    print("".join(["-" for x in range(0, 100)]), end='\n\n', flush=True)       
 
 #Save attachments
 for attachment in attachment_list:
